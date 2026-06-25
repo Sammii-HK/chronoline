@@ -259,10 +259,39 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
   const laneOf = (e: HistEvent) => (colorMode === 'thread' ? e.thread : e.domain)
   const colorOf = (e: HistEvent) => map[laneOf(e)]?.color ?? '#888'
 
+  // hierarchical sub-lanes: in region mode, each region splits into its
+  // sub-regions (countries) as you zoom in, and re-bundles as you zoom out.
+  const subLanes = useMemo(() => {
+    const m = new Map<string, string[]>()
+    for (const t of THREADS) m.set(t.id, [])
+    for (const e of events) {
+      const arr = m.get(e.thread)
+      if (!arr) continue
+      const key = e.sub ?? '·'
+      if (!arr.includes(key)) arr.push(key)
+    }
+    for (const arr of m.values())
+      arr.sort((a, b) => (a === '·' ? -1 : b === '·' ? 1 : a.localeCompare(b)))
+    return m
+  }, [events])
+
+  const sp = colorMode === 'thread' ? smooth(clamp((view.k - 5) / 4, 0, 1)) : 0
+  const subY = (regionRow: number, arr: string[], j: number) => {
+    const spread = 0.78 * rowGap
+    return rowY(regionRow) + ((j - (arr.length - 1) / 2) / Math.max(1, arr.length - 1)) * spread * sp
+  }
+  const eventY = (e: HistEvent) => {
+    const i = laneIndex.get(laneOf(e)) ?? 0
+    if (sp <= 0) return rowY(i)
+    const arr = subLanes.get(e.thread)
+    if (!arr || arr.length <= 1) return rowY(i)
+    return subY(i, arr, arr.indexOf(e.sub ?? '·'))
+  }
+
   // visible, sorted so important draw last (on top)
   const visible = events
     .filter((e) => showImp(e.importance))
-    .map((e) => ({ e, x: sx(e.year), y: rowY(laneIndex.get(laneOf(e)) ?? 0) }))
+    .map((e) => ({ e, x: sx(e.year), y: eventY(e) }))
     .filter((p) => p.x > -60 && p.x < w + 60)
     .sort((a, b) => b.e.importance - a.e.importance)
 
@@ -338,7 +367,13 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
             Domain
           </button>
         </div>
-        <button className={`btn ${mwOn ? 'on' : ''}`} onClick={() => setMwOn((v) => !v)}>
+        <button
+          className={`btn ${mwOn ? 'on' : ''}`}
+          onClick={() => {
+            if (!mwOn) setMwYear(clamp(Math.round(yearAtPx(dimsRef.current.w / 2)), boundsRef.current[0], boundsRef.current[1]))
+            setMwOn((v) => !v)
+          }}
+        >
           Meanwhile
         </button>
         <input
@@ -409,9 +444,25 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
             const x0 = clamp(sx(minY), 0, w)
             const x1 = clamp(sx(maxY), 0, w)
             return (
-              <line key={l.id} x1={x0} y1={y} x2={x1} y2={y} stroke={l.color} strokeWidth={2.4} strokeLinecap="round" opacity={0.85} />
+              <line key={l.id} x1={x0} y1={y} x2={x1} y2={y} stroke={l.color} strokeWidth={2.4} strokeLinecap="round" opacity={colorMode === 'thread' ? 0.85 * (1 - 0.6 * sp) : 0.85} />
             )
           })}
+
+          {/* sub-region lanes, revealed on zoom */}
+          {colorMode === 'thread' &&
+            sp > 0.02 &&
+            lanes.map((l, i) => {
+              const arr = subLanes.get(l.id) || []
+              if (arr.length <= 1) return null
+              const x0 = clamp(sx(minY), 0, w)
+              const x1 = clamp(sx(maxY), 0, w)
+              return arr.map((_s, j) => {
+                const y = subY(i, arr, j)
+                return (
+                  <line key={`${l.id}-sub-${j}`} x1={x0} y1={y} x2={x1} y2={y} stroke={l.color} strokeWidth={1.2} strokeLinecap="round" opacity={0.2 + 0.5 * sp} />
+                )
+              })
+            })}
 
           {/* interchange connectors (region mode only) */}
           {colorMode === 'thread' &&
@@ -432,18 +483,17 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
                 }),
               )}
 
-          {/* meanwhile sweep line */}
+          {/* meanwhile sweep line, with a wide invisible grab strip */}
           {mwOn && (() => {
             const x = sx(mwYear)
             return (
-              <g>
-                <line x1={x} y1={TOP - 10} x2={x} y2={h - BOTTOM + 8} stroke="var(--accent)" strokeWidth={1.5} strokeDasharray="5 4" />
-                <g style={{ cursor: 'ew-resize' }} onPointerDown={onMwDown}>
-                  <rect x={x - 30} y={TOP - 26} width={60} height={18} rx={5} fill="var(--accent)" />
-                  <text x={x} y={TOP - 13} textAnchor="middle" fontSize={11} fill="#1a1206" fontWeight={600}>
-                    {mwYear < 0 ? `${Math.abs(mwYear)} BC` : mwYear}
-                  </text>
-                </g>
+              <g style={{ cursor: 'ew-resize' }} onPointerDown={onMwDown}>
+                <rect x={x - 22} y={TOP - 16} width={44} height={h - BOTTOM - TOP + 26} fill="transparent" />
+                <line x1={x} y1={TOP - 12} x2={x} y2={h - BOTTOM + 8} stroke="var(--accent)" strokeWidth={1.5} strokeDasharray="5 4" pointerEvents="none" />
+                <rect x={x - 33} y={TOP - 27} width={66} height={20} rx={6} fill="var(--accent)" pointerEvents="none" />
+                <text x={x} y={TOP - 13} textAnchor="middle" fontSize={11} fill="#1a1206" fontWeight={600} pointerEvents="none">
+                  {mwYear < 0 ? `${Math.abs(mwYear)} BCE` : `${mwYear} CE`}
+                </text>
               </g>
             )
           })()}
@@ -524,6 +574,29 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
               </g>
             )
           })()}
+
+          {/* sub-region labels, revealed on deep zoom */}
+          {colorMode === 'thread' &&
+            sp > 0.55 &&
+            lanes.map((l, i) => {
+              const arr = subLanes.get(l.id) || []
+              if (arr.length <= 1) return null
+              return arr.map((sname, j) => {
+                if (sname === '·') return null
+                return (
+                  <text
+                    key={`${l.id}-sl-${j}`}
+                    x={7}
+                    y={subY(i, arr, j) + 3}
+                    fontSize={9.5}
+                    opacity={(sp - 0.55) / 0.45}
+                    style={{ paintOrder: 'stroke', stroke: 'var(--bg)', strokeWidth: 3, fill: l.color }}
+                  >
+                    {sname}
+                  </text>
+                )
+              })
+            })}
 
         </svg>
 

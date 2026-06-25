@@ -31,4 +31,6 @@ export interface HistEvent {
   fuzzy?: boolean
   links?: ThreadId[]
   note?: string
+  /** Optional sub-region / country within the thread, revealed when you zoom in. */
+  sub?: string
 }
