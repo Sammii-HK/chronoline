@@ -9,8 +9,11 @@ const smooth = (x: number) => {
   const t = clamp(x, 0, 1)
   return t * t * (3 - 2 * t)
 }
-const fmtYear = (y: number) =>
-  y < 0 ? `${Math.abs(Math.round(y)).toLocaleString()} BCE` : `${Math.round(y).toLocaleString()} CE`
+const fmtYear = (y: number) => {
+  const a = Math.abs(Math.round(y))
+  const s = a >= 10000 ? a.toLocaleString() : String(a)
+  return y < 0 ? `${s} BCE` : `${s} CE`
+}
 
 const STEPS = [5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000]
 function niceStep(k: number, w: number, span: number) {
@@ -18,6 +21,30 @@ function niceStep(k: number, w: number, span: number) {
   const want = 110 / ppy
   for (const s of STEPS) if (s >= want) return s
   return 2000
+}
+
+const commaN = (n: number) => Math.round(n).toLocaleString()
+
+// The McCandless "wait, that can't be right" lines for a compared pair.
+function scaleReveals(a: HistEvent, b: HistEvent): string[] {
+  const old = a.year <= b.year ? a : b
+  const young = a.year <= b.year ? b : a
+  const gap = young.year - old.year
+  if (gap <= 0) return []
+  const out: string[] = []
+  const toNow = 2025 - young.year
+  if (toNow > 0 && gap > toNow) {
+    out.push(`${young.title} sits closer to today than to ${old.title}: ${commaN(toNow)} years back, versus ${commaN(gap)} years between the two.`)
+  }
+  const lifetimes = gap / 76
+  if (lifetimes >= 2) {
+    out.push(`That is about ${commaN(lifetimes)} human lifetimes laid end to end.`)
+  }
+  const histPct = (gap / 5225) * 100
+  if (histPct >= 18) {
+    out.push(`It spans roughly ${Math.round(histPct)}% of all recorded history.`)
+  }
+  return out.slice(0, 3)
 }
 
 const TOP = 30
@@ -110,11 +137,13 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
     return () => el.removeEventListener('wheel', onWheel)
   }, [zoomAbout])
 
-  const drag = useRef<{ mode: 'pan' | 'mw' | null; lastX: number; startX: number; moved: boolean }>({
+  const pointers = useRef(new Map<number, number>())
+  const gesture = useRef<{ mode: 'pan' | 'mw' | 'pinch' | null; lastX: number; startX: number; moved: boolean; pinchDist: number }>({
     mode: null,
     lastX: 0,
     startX: 0,
     moved: false,
+    pinchDist: 0,
   })
 
   const localX = (clientX: number) => {
@@ -130,37 +159,62 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     const px = localX(e.clientX)
-    drag.current = { mode: 'pan', lastX: px, startX: px, moved: false }
+    pointers.current.set(e.pointerId, px)
     stageRef.current?.setPointerCapture(e.pointerId)
-    stageRef.current?.classList.add('grabbing')
+    if (pointers.current.size >= 2) {
+      const xs = [...pointers.current.values()]
+      gesture.current = { mode: 'pinch', lastX: px, startX: px, moved: true, pinchDist: Math.abs(xs[0] - xs[1]) || 1 }
+    } else {
+      gesture.current = { mode: 'pan', lastX: px, startX: px, moved: false, pinchDist: 0 }
+      stageRef.current?.classList.add('grabbing')
+    }
     setHover(null)
   }
   const onMwDown = (e: React.PointerEvent<SVGGElement>) => {
     e.stopPropagation()
-    drag.current = { mode: 'mw', lastX: 0, startX: 0, moved: true }
+    pointers.current.set(e.pointerId, localX(e.clientX))
+    gesture.current = { mode: 'mw', lastX: 0, startX: 0, moved: true, pinchDist: 0 }
     stageRef.current?.setPointerCapture(e.pointerId)
   }
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    const m = drag.current
-    if (!m.mode) return
+    const g = gesture.current
+    if (!g.mode) return
     const px = localX(e.clientX)
-    if (m.mode === 'mw') {
+    if (pointers.current.has(e.pointerId)) pointers.current.set(e.pointerId, px)
+    if (g.mode === 'mw') {
       setMwYear(clamp(Math.round(yearAtPx(px)), boundsRef.current[0], boundsRef.current[1]))
       return
     }
-    const dx = px - m.lastX
-    m.lastX = px
-    if (Math.abs(px - m.startX) > 4) m.moved = true
+    if (g.mode === 'pinch') {
+      const xs = [...pointers.current.values()]
+      if (xs.length >= 2) {
+        const dist = Math.abs(xs[0] - xs[1]) || 1
+        const mid = (xs[0] + xs[1]) / 2
+        const factor = dist / (g.pinchDist || dist)
+        g.pinchDist = dist
+        if (isFinite(factor) && factor > 0) zoomAbout(mid, factor)
+      }
+      return
+    }
+    const dx = px - g.lastX
+    g.lastX = px
+    if (Math.abs(px - g.startX) > 4) g.moved = true
     setView((v) => ({ k: v.k, tx: clampTx(v.tx + dx, v.k, dimsRef.current.w) }))
   }
   const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
     stageRef.current?.releasePointerCapture(e.pointerId)
-    stageRef.current?.classList.remove('grabbing')
-    drag.current.mode = null
+    pointers.current.delete(e.pointerId)
+    if (pointers.current.size === 0) {
+      stageRef.current?.classList.remove('grabbing')
+      gesture.current.mode = null
+    } else if (pointers.current.size === 1 && gesture.current.mode === 'pinch') {
+      const rx = [...pointers.current.values()][0]
+      gesture.current = { mode: 'pan', lastX: rx, startX: rx, moved: true, pinchDist: 0 }
+    }
   }
 
   const toggleSel = (id: string) => {
-    if (drag.current.moved) return
+    if (gesture.current.moved) return
     setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id].slice(-2)))
   }
 
@@ -411,10 +465,17 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
                   stroke={c}
                   strokeWidth={imp === 1 ? 3 : 1.1}
                   strokeDasharray={p.e.fuzzy ? '2.5 2' : undefined}
+                  pointerEvents="none"
+                />
+                <circle
+                  cx={p.x}
+                  cy={p.y}
+                  r={Math.max(r + 7, 14)}
+                  fill="transparent"
                   style={{ cursor: 'pointer' }}
                   onClick={() => toggleSel(p.e.id)}
                   onMouseEnter={(ev) => {
-                    if (drag.current.mode) return
+                    if (gesture.current.mode) return
                     const rr = stageRef.current!.getBoundingClientRect()
                     setHover({ id: p.e.id, mx: ev.clientX - rr.left, my: ev.clientY - rr.top })
                   }}
@@ -503,17 +564,38 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
           </div>
         )}
 
-        {selEvents.length === 2 && (
+        {selEvents.length === 1 && (
           <div className="readout">
-            <b>{Math.abs(selEvents[0].year - selEvents[1].year).toLocaleString()} years</b> between{' '}
-            {selEvents[0].title} ({fmtYear(selEvents[0].year)}) and {selEvents[1].title} ({fmtYear(selEvents[1].year)})
+            <div>
+              <b>{selEvents[0].title}</b> · {fmtYear(selEvents[0].year)}
+              {selEvents[0].endYear ? ` to ${fmtYear(selEvents[0].endYear)}` : ''} · {THREAD_MAP[selEvents[0].thread]?.name}
+            </div>
+            {selEvents[0].note ? <div className="rnote">{selEvents[0].note}</div> : null}
+            <div className="rhint">tap another event to compare</div>
             <span className="x" onClick={() => setSel([])}>
               clear
             </span>
           </div>
         )}
 
-        <div className="hint">scroll to zoom · drag to pan · click two events to compare</div>
+        {selEvents.length === 2 && (
+          <div className="readout">
+            <div>
+              <b>{commaN(Math.abs(selEvents[0].year - selEvents[1].year))} years</b> between {selEvents[0].title} (
+              {fmtYear(selEvents[0].year)}) and {selEvents[1].title} ({fmtYear(selEvents[1].year)})
+            </div>
+            {scaleReveals(selEvents[0], selEvents[1]).map((line, i) => (
+              <div className="reveal" key={i}>
+                {line}
+              </div>
+            ))}
+            <span className="x" onClick={() => setSel([])}>
+              clear
+            </span>
+          </div>
+        )}
+
+        <div className="hint">scroll or pinch to zoom · drag to pan · tap two events to compare</div>
       </div>
     </div>
   )
