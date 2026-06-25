@@ -5,6 +5,7 @@ import { THREADS, DOMAINS, THREAD_MAP, DOMAIN_MAP } from './data/threads'
 type ColorMode = 'thread' | 'domain'
 
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v))
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t
 const smooth = (x: number) => {
   const t = clamp(x, 0, 1)
   return t * t * (3 - 2 * t)
@@ -49,6 +50,9 @@ function scaleReveals(a: HistEvent, b: HistEvent): string[] {
 
 const TOP = 30
 const BOTTOM = 46
+const LANE_H = 26
+
+type View = { k: number; tx: number; ty: number }
 
 export default function Timeline({ events }: { events: HistEvent[] }) {
   const stageRef = useRef<HTMLDivElement>(null)
@@ -56,10 +60,11 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
   const [dims, setDims] = useState({ w: 1200, h: 640 })
 
   const [colorMode, setColorMode] = useState<ColorMode>('thread')
-  const [view, setView] = useState({ k: 1, tx: 0 })
+  const [view, setView] = useState<View>({ k: 1, tx: 0, ty: 0 })
   const viewRef = useRef(view)
   viewRef.current = view
   const didInit = useRef(false)
+  const anim = useRef<number | undefined>(undefined)
 
   const [sel, setSel] = useState<string[]>([])
   const [hover, setHover] = useState<{ id: string; mx: number; my: number } | null>(null)
@@ -87,6 +92,10 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
 
   const clampTx = useCallback((tx: number, k: number, w: number) => clamp(tx, 120 - w * k, w - 120), [])
 
+  // refs the imperative handlers read from (kept current by render)
+  const spRef = useRef(0)
+  const tyMinRef = useRef(0)
+
   useEffect(() => {
     const el = stageRef.current
     if (!el) return
@@ -103,15 +112,34 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
         const W1 = 2030
         const nk = clamp(span / (W1 - W0), 0.8, 90)
         const ppy = d.w / span
-        setView({ k: nk, tx: clampTx(-(W0 - lo) * ppy * nk, nk, d.w) })
+        setView({ k: nk, tx: clampTx(-(W0 - lo) * ppy * nk, nk, d.w), ty: 0 })
       }
     })
     ro.observe(el)
     return () => ro.disconnect()
   }, [clampTx])
 
+  const cancelAnim = () => {
+    if (anim.current != null) cancelAnimationFrame(anim.current)
+    anim.current = undefined
+  }
+  const animateTo = useCallback((target: View, ms = 340) => {
+    cancelAnim()
+    const start = { ...viewRef.current }
+    const t0 = performance.now()
+    const step = (now: number) => {
+      const p = Math.min(1, (now - t0) / ms)
+      const e = smooth(p)
+      setView({ k: lerp(start.k, target.k, e), tx: lerp(start.tx, target.tx, e), ty: lerp(start.ty, target.ty, e) })
+      if (p < 1) anim.current = requestAnimationFrame(step)
+      else anim.current = undefined
+    }
+    anim.current = requestAnimationFrame(step)
+  }, [])
+
   const zoomAbout = useCallback(
     (px: number, factor: number) => {
+      cancelAnim()
       setView((v) => {
         const w = dimsRef.current.w
         const [lo, hi] = boundsRef.current
@@ -119,10 +147,24 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
         const nk = clamp(v.k * factor, 0.75, 90)
         const yr = lo + (px - v.tx) / (ppy * v.k)
         const ntx = clampTx(px - (yr - lo) * ppy * nk, nk, w)
-        return { k: nk, tx: ntx }
+        return { k: nk, tx: ntx, ty: v.ty }
       })
     },
     [clampTx],
+  )
+
+  const zoomBy = useCallback(
+    (factor: number) => {
+      const w = dimsRef.current.w
+      const [lo, hi] = boundsRef.current
+      const ppy = w / (hi - lo)
+      const v = viewRef.current
+      const px = w / 2
+      const nk = clamp(v.k * factor, 0.75, 90)
+      const yr = lo + (px - v.tx) / (ppy * v.k)
+      animateTo({ k: nk, tx: clampTx(px - (yr - lo) * ppy * nk, nk, w), ty: v.ty })
+    },
+    [animateTo, clampTx],
   )
 
   useEffect(() => {
@@ -138,18 +180,17 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
   }, [zoomAbout])
 
   const pointers = useRef(new Map<number, number>())
-  const gesture = useRef<{ mode: 'pan' | 'mw' | 'pinch' | null; lastX: number; startX: number; moved: boolean; pinchDist: number }>({
+  const gesture = useRef<{ mode: 'pan' | 'mw' | 'pinch' | null; lastX: number; lastY: number; startX: number; moved: boolean; pinchDist: number }>({
     mode: null,
     lastX: 0,
+    lastY: 0,
     startX: 0,
     moved: false,
     pinchDist: 0,
   })
 
-  const localX = (clientX: number) => {
-    const r = stageRef.current!.getBoundingClientRect()
-    return clientX - r.left
-  }
+  const rect = () => stageRef.current!.getBoundingClientRect()
+  const localX = (clientX: number) => clientX - rect().left
   const yearAtPx = (px: number) => {
     const w = dimsRef.current.w
     const [lo, hi] = boundsRef.current
@@ -158,28 +199,34 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
   }
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    const px = localX(e.clientX)
+    cancelAnim()
+    const r = rect()
+    const px = e.clientX - r.left
+    const py = e.clientY - r.top
     pointers.current.set(e.pointerId, px)
     stageRef.current?.setPointerCapture(e.pointerId)
     if (pointers.current.size >= 2) {
       const xs = [...pointers.current.values()]
-      gesture.current = { mode: 'pinch', lastX: px, startX: px, moved: true, pinchDist: Math.abs(xs[0] - xs[1]) || 1 }
+      gesture.current = { mode: 'pinch', lastX: px, lastY: py, startX: px, moved: true, pinchDist: Math.abs(xs[0] - xs[1]) || 1 }
     } else {
-      gesture.current = { mode: 'pan', lastX: px, startX: px, moved: false, pinchDist: 0 }
+      gesture.current = { mode: 'pan', lastX: px, lastY: py, startX: px, moved: false, pinchDist: 0 }
       stageRef.current?.classList.add('grabbing')
     }
     setHover(null)
   }
   const onMwDown = (e: React.PointerEvent<SVGGElement>) => {
     e.stopPropagation()
+    cancelAnim()
     pointers.current.set(e.pointerId, localX(e.clientX))
-    gesture.current = { mode: 'mw', lastX: 0, startX: 0, moved: true, pinchDist: 0 }
+    gesture.current = { mode: 'mw', lastX: 0, lastY: 0, startX: 0, moved: true, pinchDist: 0 }
     stageRef.current?.setPointerCapture(e.pointerId)
   }
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const g = gesture.current
     if (!g.mode) return
-    const px = localX(e.clientX)
+    const r = rect()
+    const px = e.clientX - r.left
+    const py = e.clientY - r.top
     if (pointers.current.has(e.pointerId)) pointers.current.set(e.pointerId, px)
     if (g.mode === 'mw') {
       setMwYear(clamp(Math.round(yearAtPx(px)), boundsRef.current[0], boundsRef.current[1]))
@@ -197,9 +244,16 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
       return
     }
     const dx = px - g.lastX
+    const dy = py - g.lastY
     g.lastX = px
-    if (Math.abs(px - g.startX) > 4) g.moved = true
-    setView((v) => ({ k: v.k, tx: clampTx(v.tx + dx, v.k, dimsRef.current.w) }))
+    g.lastY = py
+    if (Math.abs(px - g.startX) > 4 || Math.abs(dy) > 4) g.moved = true
+    const vertical = spRef.current > 0.1
+    setView((v) => ({
+      k: v.k,
+      tx: clampTx(v.tx + dx, v.k, dimsRef.current.w),
+      ty: vertical ? clamp(v.ty + dy, tyMinRef.current, 0) : v.ty,
+    }))
   }
   const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
     stageRef.current?.releasePointerCapture(e.pointerId)
@@ -209,7 +263,7 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
       gesture.current.mode = null
     } else if (pointers.current.size === 1 && gesture.current.mode === 'pinch') {
       const rx = [...pointers.current.values()][0]
-      gesture.current = { mode: 'pan', lastX: rx, startX: rx, moved: true, pinchDist: 0 }
+      gesture.current = { mode: 'pan', lastX: rx, lastY: gesture.current.lastY, startX: rx, moved: true, pinchDist: 0 }
     }
   }
 
@@ -217,6 +271,17 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
     if (gesture.current.moved) return
     setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id].slice(-2)))
   }
+
+  const resetView = useCallback(() => {
+    const w = dimsRef.current.w
+    const [lo, hi] = boundsRef.current
+    const span = hi - lo
+    const nk = clamp(span / (2030 - -2500), 0.8, 90)
+    const ppy = w / span
+    animateTo({ k: nk, tx: clampTx(-(-2500 - lo) * ppy * nk, nk, w), ty: 0 })
+    setSel([])
+    setMwOn(false)
+  }, [animateTo, clampTx])
 
   const runSearch = () => {
     const q = query.trim().toLowerCase()
@@ -227,7 +292,7 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
     const [lo, hi] = boundsRef.current
     const ppy = w / (hi - lo)
     const nk = Math.max(viewRef.current.k, 3.4)
-    setView({ k: nk, tx: clampTx(w / 2 - (hit.year - lo) * ppy * nk, nk, w) })
+    animateTo({ k: nk, tx: clampTx(w / 2 - (hit.year - lo) * ppy * nk, nk, w), ty: 0 })
     setSel([hit.id])
   }
 
@@ -241,6 +306,28 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
   const n = lanes.length
   const map = colorMode === 'thread' ? THREAD_MAP : DOMAIN_MAP
 
+  // sub-regions per thread, and a flat ordered list of all sub-lanes for the expanded view
+  const { subLanes, qMap, Q } = useMemo(() => {
+    const subLanes = new Map<string, string[]>()
+    for (const t of THREADS) subLanes.set(t.id, [])
+    for (const e of events) {
+      const arr = subLanes.get(e.thread)
+      if (!arr) continue
+      const key = e.sub ?? '·'
+      if (!arr.includes(key)) arr.push(key)
+    }
+    for (const arr of subLanes.values())
+      arr.sort((a, b) => (a === '·' ? -1 : b === '·' ? 1 : a.localeCompare(b)))
+    const qMap = new Map<string, number>()
+    let q = 0
+    for (const t of THREADS) {
+      const arr = subLanes.get(t.id)!
+      const list = arr.length ? arr : ['·']
+      for (const s of list) qMap.set(t.id + '|' + s, q++)
+    }
+    return { subLanes, qMap, Q: q }
+  }, [events])
+
   const { w, h } = dims
   const ppyBase = w / (maxY - minY)
   const sx = (year: number) => (year - minY) * ppyBase * view.k + view.tx
@@ -251,6 +338,14 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
   const rowY = (i: number) => centerY + (i - (n - 1) / 2) * rowGap * eff
 
   const k = view.k
+  const sp = colorMode === 'thread' ? smooth(clamp((k - 5) / 4, 0, 1)) : 0
+  const expandedH = Q * LANE_H + 24
+  const tyMin = Math.min(0, h - BOTTOM - (TOP + 12 + expandedH))
+  spRef.current = sp
+  tyMinRef.current = tyMin
+  const tyEff = sp > 0 ? clamp(view.ty, tyMin, 0) : 0
+  const expandedY = (q: number) => TOP + 12 + q * LANE_H + LANE_H / 2 + tyEff
+
   const showImp = (i: number) =>
     i === 1 ? true : i === 2 ? k >= 1.5 : i === 3 ? k >= 2.6 : k >= 4.2
   const showLbl = (i: number) =>
@@ -259,33 +354,17 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
   const laneOf = (e: HistEvent) => (colorMode === 'thread' ? e.thread : e.domain)
   const colorOf = (e: HistEvent) => map[laneOf(e)]?.color ?? '#888'
 
-  // hierarchical sub-lanes: in region mode, each region splits into its
-  // sub-regions (countries) as you zoom in, and re-bundles as you zoom out.
-  const subLanes = useMemo(() => {
-    const m = new Map<string, string[]>()
-    for (const t of THREADS) m.set(t.id, [])
-    for (const e of events) {
-      const arr = m.get(e.thread)
-      if (!arr) continue
-      const key = e.sub ?? '·'
-      if (!arr.includes(key)) arr.push(key)
-    }
-    for (const arr of m.values())
-      arr.sort((a, b) => (a === '·' ? -1 : b === '·' ? 1 : a.localeCompare(b)))
-    return m
-  }, [events])
-
-  const sp = colorMode === 'thread' ? smooth(clamp((view.k - 5) / 4, 0, 1)) : 0
-  const subY = (regionRow: number, arr: string[], j: number) => {
-    const spread = 0.78 * rowGap
-    return rowY(regionRow) + ((j - (arr.length - 1) / 2) / Math.max(1, arr.length - 1)) * spread * sp
+  // y for a thread-mode sub-lane, blended from its region row to its expanded slot
+  const laneFinalY = (regionRow: number, threadId: string, sub: string) => {
+    const cY = rowY(regionRow)
+    if (sp <= 0) return cY
+    const q = qMap.get(threadId + '|' + sub) ?? 0
+    return lerp(cY, expandedY(q), sp)
   }
   const eventY = (e: HistEvent) => {
     const i = laneIndex.get(laneOf(e)) ?? 0
-    if (sp <= 0) return rowY(i)
-    const arr = subLanes.get(e.thread)
-    if (!arr || arr.length <= 1) return rowY(i)
-    return subY(i, arr, arr.indexOf(e.sub ?? '·'))
+    if (colorMode !== 'thread' || sp <= 0) return rowY(i)
+    return laneFinalY(i, e.thread, e.sub ?? '·')
   }
 
   // visible, sorted so important draw last (on top)
@@ -384,25 +463,13 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
           onKeyDown={(e) => e.key === 'Enter' && runSearch()}
         />
         <div className="spacer" />
-        <button className="btn icon" aria-label="Zoom out" onClick={() => zoomAbout(dimsRef.current.w / 2, 1 / 1.4)}>
+        <button className="btn icon" aria-label="Zoom out" onClick={() => zoomBy(1 / 1.6)}>
           –
         </button>
-        <button className="btn icon" aria-label="Zoom in" onClick={() => zoomAbout(dimsRef.current.w / 2, 1.4)}>
+        <button className="btn icon" aria-label="Zoom in" onClick={() => zoomBy(1.6)}>
           +
         </button>
-        <button
-          className="btn"
-          onClick={() => {
-            const wv = dimsRef.current.w
-            const [lo, hi] = boundsRef.current
-            const span = hi - lo
-            const nk = clamp(span / (2030 - -2500), 0.8, 90)
-            const ppy = wv / span
-            setView({ k: nk, tx: clampTx(-(-2500 - lo) * ppy * nk, nk, wv) })
-            setSel([])
-            setMwOn(false)
-          }}
-        >
+        <button className="btn" onClick={resetView}>
           Reset
         </button>
       </div>
@@ -438,13 +505,13 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
             )
           })}
 
-          {/* lane lines */}
+          {/* region trunk lines (fade out as they split) */}
           {lanes.map((l, i) => {
             const y = rowY(i)
             const x0 = clamp(sx(minY), 0, w)
             const x1 = clamp(sx(maxY), 0, w)
             return (
-              <line key={l.id} x1={x0} y1={y} x2={x1} y2={y} stroke={l.color} strokeWidth={2.4} strokeLinecap="round" opacity={colorMode === 'thread' ? 0.85 * (1 - 0.6 * sp) : 0.85} />
+              <line key={l.id} x1={x0} y1={y} x2={x1} y2={y} stroke={l.color} strokeWidth={2.4} strokeLinecap="round" opacity={colorMode === 'thread' ? 0.85 * (1 - sp) : 0.85} />
             )
           })}
 
@@ -456,32 +523,13 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
               if (arr.length <= 1) return null
               const x0 = clamp(sx(minY), 0, w)
               const x1 = clamp(sx(maxY), 0, w)
-              return arr.map((_s, j) => {
-                const y = subY(i, arr, j)
+              return arr.map((s) => {
+                const y = laneFinalY(i, l.id, s)
                 return (
-                  <line key={`${l.id}-sub-${j}`} x1={x0} y1={y} x2={x1} y2={y} stroke={l.color} strokeWidth={1.2} strokeLinecap="round" opacity={0.2 + 0.5 * sp} />
+                  <line key={`${l.id}-sub-${s}`} x1={x0} y1={y} x2={x1} y2={y} stroke={l.color} strokeWidth={1.2} strokeLinecap="round" opacity={0.3 + 0.55 * sp} />
                 )
               })
             })}
-
-          {/* interchange connectors (region mode only) */}
-          {colorMode === 'thread' &&
-            eff > 0.6 &&
-            visible
-              .filter((p) => p.e.importance === 1 && p.e.links && p.e.links.length)
-              .flatMap((p) =>
-                (p.e.links as string[]).map((lid) => {
-                  const ti = laneIndex.get(lid)
-                  if (ti == null) return null
-                  const ly = rowY(ti)
-                  return (
-                    <g key={`c${p.e.id}-${lid}`}>
-                      <line x1={p.x} y1={p.y} x2={p.x} y2={ly} stroke={colorOf(p.e)} strokeWidth={1.3} strokeDasharray="2 3" opacity={0.5} />
-                      <circle cx={p.x} cy={ly} r={3} fill="var(--bg)" stroke={map[lid]?.color ?? '#888'} strokeWidth={1.5} />
-                    </g>
-                  )
-                }),
-              )}
 
           {/* meanwhile sweep line, with a wide invisible grab strip */}
           {mwOn && (() => {
@@ -526,7 +574,7 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
                   onClick={() => toggleSel(p.e.id)}
                   onMouseEnter={(ev) => {
                     if (gesture.current.mode) return
-                    const rr = stageRef.current!.getBoundingClientRect()
+                    const rr = rect()
                     setHover({ id: p.e.id, mx: ev.clientX - rr.left, my: ev.clientY - rr.top })
                   }}
                   onMouseLeave={() => setHover(null)}
@@ -560,16 +608,16 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
             const a = selEvents[0]
             const b = selEvents[1]
             const ax = sx(a.year)
-            const ay = rowY(laneIndex.get(laneOf(a)) ?? 0)
+            const ay = eventY(a)
             const bx = sx(b.year)
-            const by = rowY(laneIndex.get(laneOf(b)) ?? 0)
+            const by = eventY(b)
             const mx = (ax + bx) / 2
             const my = (ay + by) / 2 - 7
             return (
               <g>
                 <line x1={ax} y1={ay} x2={bx} y2={by} stroke="var(--text)" strokeWidth={1.5} strokeDasharray="4 4" />
                 <text x={mx} y={my} textAnchor="middle" fontSize={12} fontWeight={600} style={{ paintOrder: 'stroke', stroke: 'var(--bg)', strokeWidth: 4, fill: 'var(--accent)' }}>
-                  {Math.abs(a.year - b.year).toLocaleString()} years apart
+                  {commaN(Math.abs(a.year - b.year))} years apart
                 </text>
               </g>
             )
@@ -581,13 +629,13 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
             lanes.map((l, i) => {
               const arr = subLanes.get(l.id) || []
               if (arr.length <= 1) return null
-              return arr.map((sname, j) => {
+              return arr.map((sname) => {
                 if (sname === '·') return null
                 return (
                   <text
-                    key={`${l.id}-sl-${j}`}
+                    key={`${l.id}-sl-${sname}`}
                     x={7}
-                    y={subY(i, arr, j) + 3}
+                    y={laneFinalY(i, l.id, sname) + 3}
                     fontSize={9.5}
                     opacity={(sp - 0.55) / 0.45}
                     style={{ paintOrder: 'stroke', stroke: 'var(--bg)', strokeWidth: 3, fill: l.color }}
@@ -597,18 +645,15 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
                 )
               })
             })}
-
         </svg>
 
         {hover && hoverEv && (
-          <div
-            className="tip"
-            style={{ left: clamp(hover.mx + 12, 4, w - 250), top: clamp(hover.my + 12, 4, h - 110) }}
-          >
+          <div className="tip" style={{ left: clamp(hover.mx + 12, 4, w - 250), top: clamp(hover.my + 12, 4, h - 110) }}>
             <b>{hoverEv.title}</b>
             <div className="meta">
               {fmtYear(hoverEv.year)}
               {hoverEv.endYear ? ` – ${fmtYear(hoverEv.endYear)}` : ''} · {THREAD_MAP[hoverEv.thread]?.name}
+              {hoverEv.sub ? ` · ${hoverEv.sub}` : ''}
             </div>
             {hoverEv.note && <div className="note">{hoverEv.note}</div>}
           </div>
