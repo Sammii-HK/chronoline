@@ -48,6 +48,29 @@ function scaleReveals(a: HistEvent, b: HistEvent): string[] {
   return out.slice(0, 3)
 }
 
+type TimeScale = 'linear' | 'log'
+
+// year -> [0,1] position. Log mode compresses deep antiquity and expands recent
+// centuries (denser where the events are), measured as time-before-present.
+function toUnit(year: number, scale: TimeScale, lo: number, hi: number) {
+  if (scale === 'linear') return (year - lo) / (hi - lo)
+  const REF = hi + 5
+  const lmin = Math.log(REF - hi + 1)
+  const lmax = Math.log(REF - lo + 1)
+  const L = Math.log(Math.max(1, REF - year + 1))
+  return (lmax - L) / (lmax - lmin)
+}
+function fromUnit(u: number, scale: TimeScale, lo: number, hi: number) {
+  if (scale === 'linear') return lo + u * (hi - lo)
+  const REF = hi + 5
+  const lmin = Math.log(REF - hi + 1)
+  const lmax = Math.log(REF - lo + 1)
+  const L = lmax - u * (lmax - lmin)
+  return REF - (Math.exp(L) - 1)
+}
+
+const LOG_TICKS = [-8000, -6000, -5000, -4000, -3000, -2000, -1500, -1000, -500, -250, 0, 250, 500, 750, 1000, 1250, 1500, 1650, 1800, 1900, 1950, 1980, 2000, 2020]
+
 const TOP = 30
 const BOTTOM = 46
 const LANE_H = 26
@@ -60,6 +83,9 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
   const [dims, setDims] = useState({ w: 1200, h: 640 })
 
   const [colorMode, setColorMode] = useState<ColorMode>('thread')
+  const [timeScale, setTimeScale] = useState<TimeScale>('linear')
+  const timeScaleRef = useRef(timeScale)
+  timeScaleRef.current = timeScale
   const [view, setView] = useState<View>({ k: 1, tx: 0, ty: 0 })
   const viewRef = useRef(view)
   viewRef.current = view
@@ -107,12 +133,13 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
       if (!didInit.current) {
         didInit.current = true
         const [lo, hi] = boundsRef.current
-        const span = hi - lo
-        const W0 = -2500
-        const W1 = 2030
-        const nk = clamp(span / (W1 - W0), 0.8, 90)
-        const ppy = d.w / span
-        setView({ k: nk, tx: clampTx(-(W0 - lo) * ppy * nk, nk, d.w), ty: 0 })
+        const ts = timeScaleRef.current
+        const W0 = ts === 'log' ? lo : -2500
+        const W1 = ts === 'log' ? hi : 2030
+        const u0 = toUnit(W0, ts, lo, hi)
+        const u1 = toUnit(W1, ts, lo, hi)
+        const nk = clamp(1 / (u1 - u0), 0.8, 90)
+        setView({ k: nk, tx: clampTx(-u0 * d.w * nk, nk, d.w), ty: 0 })
       }
     })
     ro.observe(el)
@@ -141,12 +168,8 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
     (px: number, factor: number) => {
       cancelAnim()
       setView((v) => {
-        const w = dimsRef.current.w
-        const [lo, hi] = boundsRef.current
-        const ppy = w / (hi - lo)
         const nk = clamp(v.k * factor, 0.75, 90)
-        const yr = lo + (px - v.tx) / (ppy * v.k)
-        const ntx = clampTx(px - (yr - lo) * ppy * nk, nk, w)
+        const ntx = clampTx(px - (px - v.tx) * (nk / v.k), nk, dimsRef.current.w)
         return { k: nk, tx: ntx, ty: v.ty }
       })
     },
@@ -156,13 +179,10 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
   const zoomBy = useCallback(
     (factor: number) => {
       const w = dimsRef.current.w
-      const [lo, hi] = boundsRef.current
-      const ppy = w / (hi - lo)
       const v = viewRef.current
       const px = w / 2
       const nk = clamp(v.k * factor, 0.75, 90)
-      const yr = lo + (px - v.tx) / (ppy * v.k)
-      animateTo({ k: nk, tx: clampTx(px - (yr - lo) * ppy * nk, nk, w), ty: v.ty })
+      animateTo({ k: nk, tx: clampTx(px - (px - v.tx) * (nk / v.k), nk, w), ty: v.ty })
     },
     [animateTo, clampTx],
   )
@@ -194,8 +214,7 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
   const yearAtPx = (px: number) => {
     const w = dimsRef.current.w
     const [lo, hi] = boundsRef.current
-    const ppy = w / (hi - lo)
-    return lo + (px - viewRef.current.tx) / (ppy * viewRef.current.k)
+    return fromUnit((px - viewRef.current.tx) / (w * viewRef.current.k), timeScaleRef.current, lo, hi)
   }
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -272,16 +291,31 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
     setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id].slice(-2)))
   }
 
+  const frameFor = useCallback(
+    (ts: TimeScale) => {
+      const w = dimsRef.current.w
+      const [lo, hi] = boundsRef.current
+      const W0 = ts === 'log' ? lo : -2500
+      const W1 = ts === 'log' ? hi : 2030
+      const u0 = toUnit(W0, ts, lo, hi)
+      const u1 = toUnit(W1, ts, lo, hi)
+      const nk = clamp(1 / (u1 - u0), 0.8, 90)
+      animateTo({ k: nk, tx: clampTx(-u0 * w * nk, nk, w), ty: 0 })
+    },
+    [animateTo, clampTx],
+  )
+
   const resetView = useCallback(() => {
-    const w = dimsRef.current.w
-    const [lo, hi] = boundsRef.current
-    const span = hi - lo
-    const nk = clamp(span / (2030 - -2500), 0.8, 90)
-    const ppy = w / span
-    animateTo({ k: nk, tx: clampTx(-(-2500 - lo) * ppy * nk, nk, w), ty: 0 })
+    frameFor(timeScaleRef.current)
     setSel([])
     setMwOn(false)
-  }, [animateTo, clampTx])
+  }, [frameFor])
+
+  const switchTimeScale = (ts: TimeScale) => {
+    setTimeScale(ts)
+    frameFor(ts)
+    setSel([])
+  }
 
   const runSearch = () => {
     const q = query.trim().toLowerCase()
@@ -290,9 +324,9 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
     if (!hit) return
     const w = dimsRef.current.w
     const [lo, hi] = boundsRef.current
-    const ppy = w / (hi - lo)
     const nk = Math.max(viewRef.current.k, 3.4)
-    animateTo({ k: nk, tx: clampTx(w / 2 - (hit.year - lo) * ppy * nk, nk, w), ty: 0 })
+    const u = toUnit(hit.year, timeScaleRef.current, lo, hi)
+    animateTo({ k: nk, tx: clampTx(w / 2 - u * w * nk, nk, w), ty: 0 })
     setSel([hit.id])
   }
 
@@ -329,8 +363,8 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
   }, [events])
 
   const { w, h } = dims
-  const ppyBase = w / (maxY - minY)
-  const sx = (year: number) => (year - minY) * ppyBase * view.k + view.tx
+  const unit = (year: number) => toUnit(year, timeScale, minY, maxY)
+  const sx = (year: number) => unit(year) * w * view.k + view.tx
   const usableH = h - TOP - BOTTOM
   const centerY = TOP + usableH / 2
   const eff = clamp(0.5 + 0.5 * smooth((view.k - 1) / 3), 0.5, 1)
@@ -406,12 +440,24 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
   placeLabels(visible.filter((p) => p.e.importance === 4 && showLbl(4)))
 
   // axis ticks
-  const step = niceStep(k, w, maxY - minY)
-  const tickStart = Math.ceil(minY / step) * step
   const ticks: number[] = []
-  for (let yv = tickStart; yv <= maxY; yv += step) {
-    const tx = sx(yv)
-    if (tx > -10 && tx < w + 10) ticks.push(yv)
+  if (timeScale === 'log') {
+    let lastX = -1e9
+    for (const yv of LOG_TICKS) {
+      if (yv < minY || yv > maxY) continue
+      const tx = sx(yv)
+      if (tx < -10 || tx > w + 10) continue
+      if (tx - lastX < 56) continue
+      lastX = tx
+      ticks.push(yv)
+    }
+  } else {
+    const step = niceStep(k, w, maxY - minY)
+    const tickStart = Math.ceil(minY / step) * step
+    for (let yv = tickStart; yv <= maxY; yv += step) {
+      const tx = sx(yv)
+      if (tx > -10 && tx < w + 10) ticks.push(yv)
+    }
   }
 
   const selEvents = sel.map((id) => byId.get(id)).filter(Boolean) as HistEvent[]
@@ -454,6 +500,13 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
           }}
         >
           Meanwhile
+        </button>
+        <button
+          className={`btn ${timeScale === 'log' ? 'on' : ''}`}
+          onClick={() => switchTimeScale(timeScale === 'log' ? 'linear' : 'log')}
+          title="Logarithmic time axis: see all of history at once"
+        >
+          Log axis
         </button>
         <input
           className="search"
