@@ -1356,14 +1356,14 @@ export const EVENTS: HistEvent[] = [
   // ===== EXPLORATION & THE GLOBAL TURN =====
   {
     id: 'columbus-1492',
-    title: 'Columbus reaches the Americas',
+    title: 'The Columbian exchange',
     year: 1492,
     thread: 'europe',
     sub: 'Iberia',
     domain: 'exploration',
     importance: 1,
     links: ['americas', 'egyptAfrica', 'ideas', 'global'],
-    note: 'He died insisting he had reached Asia, never knowing he had found two continents',
+    note: 'The potato and maize crossed to Europe and the world\'s true map emerged, at catastrophic cost to the Americas',
   },
   {
     id: 'columbian-exchange',
@@ -1428,8 +1428,7 @@ export const EVENTS: HistEvent[] = [
     thread: 'egyptAfrica',
     sub: 'West Africa',
     domain: 'economy',
-    importance: 1,
-    links: ['americas', 'europe', 'global'],
+    importance: 3,
     note: 'Some 12 million Africans were shipped across the Atlantic in chains',
   },
   {
