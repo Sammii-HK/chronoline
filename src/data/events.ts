@@ -2300,8 +2300,7 @@ export const EVENTS: HistEvent[] = [
     year: 2001,
     thread: 'global',
     domain: 'war',
-    importance: 1,
-    links: ['americas', 'islamic', 'nearEast'],
+    importance: 3,
     note: 'Nineteen hijackers reshaped two decades of global security and conflict',
   },
   {
