@@ -341,7 +341,7 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
   const map = colorMode === 'thread' ? THREAD_MAP : DOMAIN_MAP
 
   // sub-regions per thread, and a flat ordered list of all sub-lanes for the expanded view
-  const { subLanes, qMap, Q } = useMemo(() => {
+  const { subLanes, slotOf, groupTop, totalUnits } = useMemo(() => {
     const subLanes = new Map<string, string[]>()
     for (const t of THREADS) subLanes.set(t.id, [])
     for (const e of events) {
@@ -352,14 +352,18 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
     }
     for (const arr of subLanes.values())
       arr.sort((a, b) => (a === '·' ? -1 : b === '·' ? 1 : a.localeCompare(b)))
-    const qMap = new Map<string, number>()
-    let q = 0
-    for (const t of THREADS) {
+    // flat slot positions (in lane units), with a gap between region groups
+    const slotOf = new Map<string, number>()
+    const groupTop = new Map<string, number>()
+    let pos = 0
+    THREADS.forEach((t, ri) => {
+      if (ri > 0) pos += 0.7
       const arr = subLanes.get(t.id)!
       const list = arr.length ? arr : ['·']
-      for (const s of list) qMap.set(t.id + '|' + s, q++)
-    }
-    return { subLanes, qMap, Q: q }
+      groupTop.set(t.id, pos)
+      for (const s of list) slotOf.set(t.id + '|' + s, pos++)
+    })
+    return { subLanes, slotOf, groupTop, totalUnits: pos }
   }, [events])
 
   const { w, h } = dims
@@ -373,12 +377,12 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
 
   const k = view.k
   const sp = colorMode === 'thread' ? smooth(clamp((k - 5) / 4, 0, 1)) : 0
-  const expandedH = Q * LANE_H + 24
+  const expandedH = totalUnits * LANE_H + 24
   const tyMin = Math.min(0, h - BOTTOM - (TOP + 12 + expandedH))
   spRef.current = sp
   tyMinRef.current = tyMin
   const tyEff = sp > 0 ? clamp(view.ty, tyMin, 0) : 0
-  const expandedY = (q: number) => TOP + 12 + q * LANE_H + LANE_H / 2 + tyEff
+  const expandedY = (slot: number) => TOP + 12 + slot * LANE_H + LANE_H / 2 + tyEff
 
   const showImp = (i: number) =>
     i === 1 ? true : i === 2 ? k >= 1.5 : i === 3 ? k >= 2.6 : k >= 4.2
@@ -392,9 +396,12 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
   const laneFinalY = (regionRow: number, threadId: string, sub: string) => {
     const cY = rowY(regionRow)
     if (sp <= 0) return cY
-    const q = qMap.get(threadId + '|' + sub) ?? 0
-    return lerp(cY, expandedY(q), sp)
+    const slot = slotOf.get(threadId + '|' + sub) ?? 0
+    return lerp(cY, expandedY(slot), sp)
   }
+  // y for a region's header label in the expanded view
+  const regionHeaderY = (regionRow: number, threadId: string) =>
+    lerp(rowY(regionRow), expandedY(groupTop.get(threadId) ?? 0) - LANE_H * 0.55, sp)
   const eventY = (e: HistEvent) => {
     const i = laneIndex.get(laneOf(e)) ?? 0
     if (colorMode !== 'thread' || sp <= 0) return rowY(i)
@@ -676,27 +683,41 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
             )
           })()}
 
-          {/* sub-region labels, revealed on deep zoom */}
+          {/* region headers + sub-region labels, revealed on deep zoom */}
           {colorMode === 'thread' &&
             sp > 0.55 &&
             lanes.map((l, i) => {
               const arr = subLanes.get(l.id) || []
               if (arr.length <= 1) return null
-              return arr.map((sname) => {
-                if (sname === '·') return null
-                return (
+              const op = (sp - 0.55) / 0.45
+              return (
+                <g key={`grp-${l.id}`}>
                   <text
-                    key={`${l.id}-sl-${sname}`}
-                    x={7}
-                    y={laneFinalY(i, l.id, sname) + 3}
-                    fontSize={9.5}
-                    opacity={(sp - 0.55) / 0.45}
-                    style={{ paintOrder: 'stroke', stroke: 'var(--bg)', strokeWidth: 3, fill: l.color }}
+                    x={6}
+                    y={regionHeaderY(i, l.id)}
+                    fontSize={11}
+                    fontWeight={500}
+                    opacity={op}
+                    style={{ paintOrder: 'stroke', stroke: 'var(--bg)', strokeWidth: 3.5, fill: l.color }}
                   >
-                    {sname}
+                    {l.name}
                   </text>
-                )
-              })
+                  {arr.map((sname) =>
+                    sname === '·' ? null : (
+                      <text
+                        key={`${l.id}-sl-${sname}`}
+                        x={16}
+                        y={laneFinalY(i, l.id, sname) + 3}
+                        fontSize={9.5}
+                        opacity={op}
+                        style={{ paintOrder: 'stroke', stroke: 'var(--bg)', strokeWidth: 3, fill: l.color }}
+                      >
+                        {sname}
+                      </text>
+                    ),
+                  )}
+                </g>
+              )
             })}
         </svg>
 
