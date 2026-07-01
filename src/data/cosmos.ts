@@ -89,9 +89,9 @@ export const COSMOS: CosmosObject[] = [
   { id: 'z-aqr-sadalsuud', name: 'Sadalsuud', distanceLy: 540, category: 'zodiac', sub: 'Aquarius', importance: 4 },
   { id: 'z-aqr-sadalmelik', name: 'Sadalmelik', distanceLy: 520, category: 'zodiac', sub: 'Aquarius', importance: 4 },
   { id: 'z-aqr-skat', name: 'Skat', distanceLy: 113, category: 'zodiac', sub: 'Aquarius', importance: 4 },
-  { id: 'z-pisces-alpherg', name: 'Alpherg', distanceLy: 330, category: 'zodiac', sub: 'Pisces', importance: 4 },
+  { id: 'z-pisces-alpherg', name: 'Alpherg', distanceLy: 350, category: 'zodiac', sub: 'Pisces', importance: 4 },
   { id: 'z-pisces-gamma', name: 'Gamma Piscium', distanceLy: 135, category: 'zodiac', sub: 'Pisces', importance: 4 },
-  { id: 'z-pisces-eta', name: 'Eta Piscium', distanceLy: 350, category: 'zodiac', sub: 'Pisces', importance: 4 },
+  { id: 'z-pisces-alrescha', name: 'Alrescha', distanceLy: 151, category: 'zodiac', sub: 'Pisces', importance: 4 },
 
   // ===== DEEP SKY: clusters and nebulae =====
   { id: 'hyades', name: 'Hyades cluster', distanceLy: 153, category: 'deepSky', importance: 3 },

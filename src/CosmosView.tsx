@@ -3,6 +3,11 @@ import { COSMOS } from './data/cosmos'
 import type { CosmosObject, CosmosCategory } from './data/cosmos'
 
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v))
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t
+const smooth = (x: number) => {
+  const t = clamp(x, 0, 1)
+  return t * t * (3 - 2 * t)
+}
 const L10 = Math.log10
 
 const CATEGORIES: { id: CosmosCategory; name: string; color: string }[] = [
@@ -15,6 +20,8 @@ const CATEGORIES: { id: CosmosCategory; name: string; color: string }[] = [
   { id: 'largeScale', name: 'Large-scale structure', color: '#6C6CE8' },
 ]
 const CAT_MAP = Object.fromEntries(CATEGORIES.map((c) => [c.id, c])) as Record<CosmosCategory, (typeof CATEGORIES)[number]>
+const ZODIAC_SIGNS = ['Aries', 'Taurus', 'Gemini', 'Cancer', 'Leo', 'Virgo', 'Libra', 'Scorpius', 'Sagittarius', 'Capricornus', 'Aquarius', 'Pisces']
+const Z_IDX = CATEGORIES.findIndex((c) => c.id === 'zodiac')
 
 function fmtDist(ly: number) {
   if (ly < 1e-6) return `${Math.round(ly * 3.156e7)} light-sec`
@@ -29,7 +36,6 @@ function fmtDist(ly: number) {
 }
 
 const TICK_LY = [3.17e-8, 1.581e-5, 1.581e-2, 1, 100, 1e4, 1e6, 1e8, 1e10]
-
 const TOP = 30
 const BOTTOM = 46
 
@@ -75,8 +81,6 @@ export default function CosmosView() {
   }, [])
   const lo = L10(loLy)
   const hi = L10(hiLy)
-  const boundsRef = useRef<[number, number]>([lo, hi])
-  boundsRef.current = [lo, hi]
 
   const clampTx = useCallback((tx: number, k: number, w: number) => clamp(tx, 120 - w * k, w - 120), [])
 
@@ -165,21 +169,48 @@ export default function CosmosView() {
     setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id].slice(-2)))
   }
 
-  // layout
+  // ---- layout: 7 category bands; the zodiac band expands into 12 sign sub-lanes on zoom ----
   const n = CATEGORIES.length
   const usableH = h - TOP - BOTTOM
-  const rowY = (i: number) => TOP + (usableH * (i + 0.5)) / n
   const catIndex = useMemo(() => new Map(CATEGORIES.map((c, i) => [c.id, i])), [])
+  const signIndex = useMemo(() => new Map(ZODIAC_SIGNS.map((s, i) => [s, i])), [])
+
+  const sp = smooth(clamp((k - 2) / 3, 0, 1))
+  const zFrac = lerp(1 / n, 0.58, sp)
+  const otherFrac = (1 - zFrac) / (n - 1)
+  const bands = useMemo(() => {
+    const out: { top: number; h: number }[] = []
+    let acc = TOP
+    for (let i = 0; i < n; i++) {
+      const bh = usableH * (i === Z_IDX ? zFrac : otherFrac)
+      out.push({ top: acc, h: bh })
+      acc += bh
+    }
+    return out
+  }, [n, usableH, zFrac, otherFrac])
+  const catCenterY = (i: number) => bands[i].top + bands[i].h / 2
+  const zSignY = (si: number) => {
+    const b = bands[Z_IDX]
+    const pad = b.h * 0.08
+    return b.top + pad + ((b.h - 2 * pad) * (si + 0.5)) / 12
+  }
+  const objY = (o: CosmosObject) => {
+    const i = catIndex.get(o.category) ?? 0
+    if (o.category === 'zodiac' && sp > 0.02 && o.sub) {
+      const si = signIndex.get(o.sub)
+      if (si != null) return lerp(catCenterY(i), zSignY(si), sp)
+    }
+    return catCenterY(i)
+  }
 
   const showImp = (i: number) => (i <= 3 ? true : k >= 2.2)
   const showLbl = (i: number) => (i === 1 ? true : i === 2 ? k >= 1.1 : i === 3 ? k >= 1.9 : k >= 3.5)
 
   const visible = COSMOS.filter((o) => showImp(o.importance))
-    .map((o) => ({ o, x: sx(o.distanceLy), y: rowY(catIndex.get(o.category) ?? 0), c: CAT_MAP[o.category].color }))
+    .map((o) => ({ o, x: sx(o.distanceLy), y: objY(o), c: CAT_MAP[o.category].color }))
     .filter((p) => p.x > -50 && p.x < w + 50)
     .sort((a, b) => b.o.importance - a.o.importance)
 
-  // label declutter: reserve horizontal space per side, important first
   type Cand = (typeof visible)[number]
   const labels: { p: Cand; side: 1 | -1 }[] = []
   const up: [number, number][] = []
@@ -276,9 +307,24 @@ export default function CosmosView() {
           ))}
 
           {CATEGORIES.map((c, i) => {
-            const y = rowY(i)
-            return <line key={c.id} x1={clamp(sx(loLy), 0, w)} y1={y} x2={clamp(sx(hiLy), 0, w)} y2={y} stroke={c.color} strokeWidth={2.4} strokeLinecap="round" opacity={0.85} />
+            const y = catCenterY(i)
+            const isZ = c.id === 'zodiac'
+            return <line key={c.id} x1={clamp(sx(loLy), 0, w)} y1={y} x2={clamp(sx(hiLy), 0, w)} y2={y} stroke={c.color} strokeWidth={2.4} strokeLinecap="round" opacity={isZ ? 0.85 * (1 - sp) : 0.85} />
           })}
+
+          {/* zodiac sign sub-lanes, revealed on zoom */}
+          {sp > 0.02 &&
+            ZODIAC_SIGNS.map((sign, si) => {
+              const y = zSignY(si)
+              return (
+                <g key={`zs${sign}`}>
+                  <line x1={clamp(sx(loLy), 0, w)} y1={y} x2={clamp(sx(hiLy), 0, w)} y2={y} stroke="#C56BD6" strokeWidth={1.2} strokeLinecap="round" opacity={0.25 + 0.5 * sp} />
+                  {sp > 0.5 && (
+                    <text x={7} y={y + 3} fontSize={10} opacity={(sp - 0.5) / 0.5} style={{ paintOrder: 'stroke', stroke: 'var(--bg)', strokeWidth: 3, fill: '#C56BD6' }}>{sign}</text>
+                  )}
+                </g>
+              )
+            })}
 
           {shellOn && (() => {
             const x = sx(shellDist)
@@ -323,9 +369,9 @@ export default function CosmosView() {
             const a = selObjs[0]
             const b = selObjs[1]
             const ax = sx(a.distanceLy)
-            const ay = rowY(catIndex.get(a.category) ?? 0)
+            const ay = objY(a)
             const bx = sx(b.distanceLy)
-            const by = rowY(catIndex.get(b.category) ?? 0)
+            const by = objY(b)
             return (
               <g>
                 <line x1={ax} y1={ay} x2={bx} y2={by} stroke="var(--text)" strokeWidth={1.5} strokeDasharray="4 4" />
@@ -362,7 +408,7 @@ export default function CosmosView() {
 
         {selObjs.length === 1 && (
           <div className="readout">
-            <div><b>{selObjs[0].name}</b> · {fmtDist(selObjs[0].distanceLy)} from Earth · {CAT_MAP[selObjs[0].category].name}</div>
+            <div><b>{selObjs[0].name}</b> · {fmtDist(selObjs[0].distanceLy)} from Earth · {CAT_MAP[selObjs[0].category].name}{selObjs[0].sub ? ` · ${selObjs[0].sub}` : ''}</div>
             {selObjs[0].note ? <div className="rnote">{selObjs[0].note}</div> : null}
             <div className="rhint">tap another object to compare</div>
             <span className="x" onClick={() => setSel([])}>clear</span>
@@ -377,7 +423,7 @@ export default function CosmosView() {
           </div>
         )}
 
-        <div className="hint">scroll to zoom · drag to pan · tap two objects to compare the gulf</div>
+        <div className="hint">scroll to zoom · drag to pan · zoom in on the zodiac to split the signs · tap two to compare</div>
       </div>
     </div>
   )
