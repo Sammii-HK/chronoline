@@ -71,6 +71,8 @@ export default function CosmosView() {
   const [shellDist, setShellDist] = useState(1000)
   const [query, setQuery] = useState('')
   const [allConst, setAllConst] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
 
   const byId = useMemo(() => new Map(COSMOS.map((o) => [o.id, o])), [])
   const [loLy, hiLy] = useMemo(() => {
@@ -300,19 +302,38 @@ export default function CosmosView() {
           <b>Chronoline · Cosmos</b>
           <span>the scale of the universe</span>
         </div>
-        <button className={`btn ${shellOn ? 'on' : ''}`} onClick={() => { if (!shellOn) setShellDist(distAtPx(dimsRef.current.w / 2)); setShellOn((v) => !v) }}>
-          Distance shell
-        </button>
-        <button
-          className="btn"
-          style={allConst ? { borderColor: '#C56BD6', color: '#C56BD6' } : undefined}
-          onClick={() => setAllConst((v) => !v)}
-          title="Toggle all 88 constellations on or off"
-        >
-          All constellations
-        </button>
-        <input className="search" placeholder="Search an object, then Enter" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && runSearch()} />
+        <div style={{ position: 'relative' }}>
+          <button className="btn" aria-expanded={menuOpen} onClick={() => setMenuOpen((v) => !v)}>
+            Options <span style={{ opacity: 0.55 }}>▾</span>
+          </button>
+          {menuOpen && (
+            <>
+              <div onClick={() => setMenuOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 29 }} />
+              <div style={{ position: 'absolute', top: '112%', left: 0, zIndex: 30, minWidth: 210, background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 10, padding: 4, boxShadow: '0 8px 28px rgba(0,0,0,0.45)' }}>
+                <button className="menuitem" onClick={() => { if (!shellOn) setShellDist(distAtPx(dimsRef.current.w / 2)); setShellOn((v) => !v) }}>
+                  <span>Distance shell</span><span style={{ color: 'var(--accent)' }}>{shellOn ? '✓' : ''}</span>
+                </button>
+                <button className="menuitem" onClick={() => setAllConst((v) => !v)}>
+                  <span>All constellations</span><span style={{ color: '#C56BD6' }}>{allConst ? '✓' : ''}</span>
+                </button>
+              </div>
+            </>
+          )}
+        </div>
         <div className="spacer" />
+        {searchOpen ? (
+          <input
+            className="search"
+            autoFocus
+            placeholder="Search, then Enter"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { runSearch(); setSearchOpen(false) } else if (e.key === 'Escape') setSearchOpen(false) }}
+            onBlur={() => { if (!query) setSearchOpen(false) }}
+          />
+        ) : (
+          <button className="btn icon" aria-label="Search" onClick={() => setSearchOpen(true)}>⌕</button>
+        )}
         <button className="btn icon" aria-label="Zoom out" onClick={() => zoomAbout(dimsRef.current.w / 2, 1 / 1.4)}>–</button>
         <button className="btn icon" aria-label="Zoom in" onClick={() => zoomAbout(dimsRef.current.w / 2, 1.4)}>+</button>
         <button className="btn" onClick={() => { setView({ k: 1, tx: 0 }); setSel([]); setShellOn(false) }}>Reset</button>
