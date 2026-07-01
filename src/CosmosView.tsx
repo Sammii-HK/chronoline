@@ -304,7 +304,7 @@ export default function CosmosView() {
           Distance shell
         </button>
         <button className={`btn ${allConst ? 'on' : ''}`} onClick={() => setAllConst((v) => !v)} title="Show all 88 constellations, or just the famous ones">
-          All 88
+          {allConst ? 'All constellations' : 'Famous only'}
         </button>
         <input className="search" placeholder="Search an object, then Enter" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && runSearch()} />
         <div className="spacer" />
