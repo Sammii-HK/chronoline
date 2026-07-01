@@ -504,7 +504,7 @@ export const PACK: HistEvent[] = [
     domain: 'culture',
     importance: 3,
     fuzzy: true,
-    links: ['religion'],
+    links: ['ideas'],
     note: 'The world\'s longest epic poem, it contains the beloved Bhagavad Gita',
   },
   {
@@ -2004,7 +2004,7 @@ export const PACK: HistEvent[] = [
     note: 'The caliph paid scholars to translate Greek works into Arabic',
   },
   {
-    id: 'wd- Songhai-fall',
+    id: 'wd-songhai-fall',
     title: 'Morocco destroys the Songhai empire',
     year: 1591,
     thread: 'egyptAfrica',
