@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import Timeline from './Timeline'
-import CosmosView from './CosmosView'
+import StrataMap from './StrataMap'
+import { cosmosConfig } from './maps/cosmos'
 import type { Lens } from './MapMenu'
 import { EVENTS as EVENTS_CORE } from './data/events'
 import { PACK as HIST_EU } from './data/pack_history_europe'
@@ -14,7 +15,7 @@ export default function App() {
   const [lens, setLens] = useState<Lens>('cosmos')
   return (
     <ErrorBoundary>
-      {lens === 'history' ? <Timeline events={EVENTS} lens={lens} setLens={setLens} /> : <CosmosView lens={lens} setLens={setLens} />}
+      {lens === 'history' ? <Timeline events={EVENTS} lens={lens} setLens={setLens} /> : <StrataMap config={cosmosConfig} lens={lens} setLens={setLens} />}
     </ErrorBoundary>
   )
 }

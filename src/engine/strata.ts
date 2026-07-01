@@ -48,11 +48,23 @@ export interface StrataConfig {
     frame?: [number, number]
   }
   lanes: Lane[]
-  /** Lane ids whose items fan into sub-lanes on deep zoom (e.g. region -> countries, constellation -> stars). */
+  /** Lane ids whose items fan into sub-lanes on deep zoom (e.g. region -> countries, constellation -> stars). v1 fans the first. */
   fanLanes?: string[]
+  /** Sub-lanes shown first, in order (e.g. the 12 zodiac signs before the other constellations). */
+  fanPrimary?: string[]
+  /** If set, only these sub-lanes (plus fanPrimary) show until the "show all" toggle is on. */
+  fanFeatured?: string[]
+  /** Label for the show-all-sub-lanes toggle (e.g. "All constellations"). */
+  fanToggleLabel?: string
   items: StrataItem[]
   /** The "wait, that can't be right" lines shown when two items are compared. */
   compare: (a: StrataItem, b: StrataItem) => string[]
-  /** Label for the scrubber ("Meanwhile in", "At this distance"...). */
+  /** Label for the cross-section scrubber option (e.g. "Distance shell", "Meanwhile"). */
   scrubberLabel: string
+  /** Suffix after a position in tooltips, e.g. " from Earth". */
+  originLabel?: string
+  /** Format a span/gap between two positions; defaults to axis.format. */
+  formatSpan?: (v: number) => string
+  /** One-line help shown under the canvas. */
+  hint?: string
 }
