@@ -21,6 +21,7 @@ const CATEGORIES: { id: CosmosCategory; name: string; color: string }[] = [
 ]
 const CAT_MAP = Object.fromEntries(CATEGORIES.map((c) => [c.id, c])) as Record<CosmosCategory, (typeof CATEGORIES)[number]>
 const ZODIAC_SIGNS = ['Aries', 'Taurus', 'Gemini', 'Cancer', 'Leo', 'Virgo', 'Libra', 'Scorpius', 'Sagittarius', 'Capricornus', 'Aquarius', 'Pisces']
+const FAMOUS = new Set([...ZODIAC_SIGNS, 'Orion', 'Ursa Major', 'Ursa Minor', 'Cassiopeia', 'Cygnus', 'Crux', 'Lyra', 'Aquila', 'Canis Major', 'Canis Minor', 'Perseus', 'Andromeda', 'Centaurus', 'Bootes', 'Pegasus', 'Draco', 'Auriga'])
 const Z_IDX = CATEGORIES.findIndex((c) => c.id === 'zodiac')
 
 function fmtDist(ly: number) {
@@ -69,6 +70,7 @@ export default function CosmosView() {
   const [shellOn, setShellOn] = useState(false)
   const [shellDist, setShellDist] = useState(1000)
   const [query, setQuery] = useState('')
+  const [allConst, setAllConst] = useState(false)
 
   const byId = useMemo(() => new Map(COSMOS.map((o) => [o.id, o])), [])
   const [loLy, hiLy] = useMemo(() => {
@@ -187,9 +189,10 @@ export default function CosmosView() {
   const constNames = useMemo(() => {
     const s = new Set<string>()
     for (const o of COSMOS) if (o.category === 'zodiac' && o.sub) s.add(o.sub)
-    const rest = [...s].filter((x) => !ZODIAC_SIGNS.includes(x)).sort()
+    const active = allConst ? [...s] : [...s].filter((x) => FAMOUS.has(x))
+    const rest = active.filter((x) => !ZODIAC_SIGNS.includes(x)).sort()
     return [...ZODIAC_SIGNS.filter((z) => s.has(z)), ...rest]
-  }, [])
+  }, [allConst])
   const constIndex = useMemo(() => new Map(constNames.map((c, i) => [c, i])), [constNames])
   const mConst = Math.max(1, constNames.length)
 
@@ -299,6 +302,9 @@ export default function CosmosView() {
         </div>
         <button className={`btn ${shellOn ? 'on' : ''}`} onClick={() => { if (!shellOn) setShellDist(distAtPx(dimsRef.current.w / 2)); setShellOn((v) => !v) }}>
           Distance shell
+        </button>
+        <button className={`btn ${allConst ? 'on' : ''}`} onClick={() => setAllConst((v) => !v)} title="Show all 88 constellations, or just the famous ones">
+          All 88
         </button>
         <input className="search" placeholder="Search an object, then Enter" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && runSearch()} />
         <div className="spacer" />
