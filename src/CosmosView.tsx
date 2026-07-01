@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { COSMOS } from './data/cosmos'
+import { COSMOS as COSMOS_BASE } from './data/cosmos'
+import { PACK as COSMOS_PACK } from './data/pack_cosmos'
 import type { CosmosObject, CosmosCategory } from './data/cosmos'
+
+const COSMOS: CosmosObject[] = [...COSMOS_BASE, ...COSMOS_PACK]
 
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v))
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t
