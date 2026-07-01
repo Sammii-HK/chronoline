@@ -1,9 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { COSMOS as COSMOS_BASE } from './data/cosmos'
-import { PACK as COSMOS_PACK } from './data/pack_cosmos'
+import { COSMOS_ALL as COSMOS } from './data/cosmosAll'
 import type { CosmosObject, CosmosCategory } from './data/cosmos'
-
-const COSMOS: CosmosObject[] = [...COSMOS_BASE, ...COSMOS_PACK]
 
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v))
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t
@@ -16,7 +13,7 @@ const L10 = Math.log10
 const CATEGORIES: { id: CosmosCategory; name: string; color: string }[] = [
   { id: 'solarSystem', name: 'Solar System', color: '#E8B84B' },
   { id: 'stars', name: 'Nearby stars', color: '#4C82C3' },
-  { id: 'zodiac', name: 'Zodiac', color: '#C56BD6' },
+  { id: 'zodiac', name: 'Constellations', color: '#C56BD6' },
   { id: 'deepSky', name: 'Clusters & nebulae', color: '#2FA98C' },
   { id: 'milkyWay', name: 'Milky Way', color: '#E07A3E' },
   { id: 'localGroup', name: 'Local Group', color: '#D7494C' },
@@ -426,7 +423,7 @@ export default function CosmosView() {
           </div>
         )}
 
-        <div className="hint">scroll to zoom · drag to pan · zoom in on the zodiac to split the signs · tap two to compare</div>
+        <div className="hint">scroll to zoom · drag to pan · zoom into a constellation to split it into its real stars · tap two to compare</div>
       </div>
     </div>
   )
