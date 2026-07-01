@@ -68,6 +68,7 @@ export default function CosmosView() {
   const [hover, setHover] = useState<{ id: string; mx: number; my: number } | null>(null)
   const [shellOn, setShellOn] = useState(false)
   const [shellDist, setShellDist] = useState(1000)
+  const [query, setQuery] = useState('')
 
   const byId = useMemo(() => new Map(COSMOS.map((o) => [o.id, o])), [])
   const [loLy, hiLy] = useMemo(() => {
@@ -168,15 +169,32 @@ export default function CosmosView() {
     if (drag.current.moved) return
     setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id].slice(-2)))
   }
+  const runSearch = () => {
+    const q = query.trim().toLowerCase()
+    if (!q) return
+    const hit = COSMOS.find((o) => o.name.toLowerCase().includes(q))
+    if (!hit) return
+    const wv = dimsRef.current.w
+    const nk = Math.max(viewRef.current.k, 8)
+    setView({ k: nk, tx: clampTx(wv / 2 - unit(hit.distanceLy) * wv * nk, nk, wv) })
+    setSel([hit.id])
+  }
 
   // ---- layout: 7 category bands; the zodiac band expands into 12 sign sub-lanes on zoom ----
   const n = CATEGORIES.length
   const usableH = h - TOP - BOTTOM
   const catIndex = useMemo(() => new Map(CATEGORIES.map((c, i) => [c.id, i])), [])
-  const signIndex = useMemo(() => new Map(ZODIAC_SIGNS.map((s, i) => [s, i])), [])
+  const constNames = useMemo(() => {
+    const s = new Set<string>()
+    for (const o of COSMOS) if (o.category === 'zodiac' && o.sub) s.add(o.sub)
+    const rest = [...s].filter((x) => !ZODIAC_SIGNS.includes(x)).sort()
+    return [...ZODIAC_SIGNS.filter((z) => s.has(z)), ...rest]
+  }, [])
+  const constIndex = useMemo(() => new Map(constNames.map((c, i) => [c, i])), [constNames])
+  const mConst = Math.max(1, constNames.length)
 
   const sp = smooth(clamp((k - 2) / 3, 0, 1))
-  const zFrac = lerp(1 / n, 0.58, sp)
+  const zFrac = lerp(1 / n, 0.82, sp)
   const otherFrac = (1 - zFrac) / (n - 1)
   const bands = useMemo(() => {
     const out: { top: number; h: number }[] = []
@@ -191,13 +209,13 @@ export default function CosmosView() {
   const catCenterY = (i: number) => bands[i].top + bands[i].h / 2
   const zSignY = (si: number) => {
     const b = bands[Z_IDX]
-    const pad = b.h * 0.08
-    return b.top + pad + ((b.h - 2 * pad) * (si + 0.5)) / 12
+    const pad = b.h * 0.05
+    return b.top + pad + ((b.h - 2 * pad) * (si + 0.5)) / mConst
   }
   const objY = (o: CosmosObject) => {
     const i = catIndex.get(o.category) ?? 0
     if (o.category === 'zodiac' && sp > 0.02 && o.sub) {
-      const si = signIndex.get(o.sub)
+      const si = constIndex.get(o.sub)
       if (si != null) return lerp(catCenterY(i), zSignY(si), sp)
     }
     return catCenterY(i)
@@ -282,6 +300,7 @@ export default function CosmosView() {
         <button className={`btn ${shellOn ? 'on' : ''}`} onClick={() => { if (!shellOn) setShellDist(distAtPx(dimsRef.current.w / 2)); setShellOn((v) => !v) }}>
           Distance shell
         </button>
+        <input className="search" placeholder="Search an object, then Enter" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && runSearch()} />
         <div className="spacer" />
         <button className="btn icon" aria-label="Zoom out" onClick={() => zoomAbout(dimsRef.current.w / 2, 1 / 1.4)}>–</button>
         <button className="btn icon" aria-label="Zoom in" onClick={() => zoomAbout(dimsRef.current.w / 2, 1.4)}>+</button>
@@ -314,17 +333,20 @@ export default function CosmosView() {
 
           {/* zodiac sign sub-lanes, revealed on zoom */}
           {sp > 0.02 &&
-            ZODIAC_SIGNS.map((sign, si) => {
-              const y = zSignY(si)
-              return (
-                <g key={`zs${sign}`}>
-                  <line x1={clamp(sx(loLy), 0, w)} y1={y} x2={clamp(sx(hiLy), 0, w)} y2={y} stroke="#C56BD6" strokeWidth={1.2} strokeLinecap="round" opacity={0.25 + 0.5 * sp} />
-                  {sp > 0.5 && (
-                    <text x={7} y={y + 3} fontSize={10} opacity={(sp - 0.5) / 0.5} style={{ paintOrder: 'stroke', stroke: 'var(--bg)', strokeWidth: 3, fill: '#C56BD6' }}>{sign}</text>
-                  )}
-                </g>
-              )
-            })}
+            (() => {
+              const laneH = (bands[Z_IDX].h * 0.9) / mConst
+              return constNames.map((sign, si) => {
+                const y = zSignY(si)
+                return (
+                  <g key={`zs${sign}`}>
+                    <line x1={clamp(sx(loLy), 0, w)} y1={y} x2={clamp(sx(hiLy), 0, w)} y2={y} stroke="#C56BD6" strokeWidth={1} strokeLinecap="round" opacity={0.16 + 0.4 * sp} />
+                    {sp > 0.6 && laneH > 10 && (
+                      <text x={7} y={y + 3} fontSize={9.5} opacity={(sp - 0.6) / 0.4} style={{ paintOrder: 'stroke', stroke: 'var(--bg)', strokeWidth: 3, fill: '#C56BD6' }}>{sign}</text>
+                    )}
+                  </g>
+                )
+              })
+            })()}
 
           {shellOn && (() => {
             const x = sx(shellDist)
@@ -345,7 +367,8 @@ export default function CosmosView() {
             return (
               <g key={p.o.id}>
                 {isSel && <circle cx={p.x} cy={p.y} r={r + 4} fill="none" stroke="var(--text)" strokeWidth={1.5} />}
-                <circle cx={p.x} cy={p.y} r={r} fill={imp === 1 ? 'var(--bg)' : p.c} stroke={p.c} strokeWidth={imp === 1 ? 3 : 1.1} style={{ cursor: 'pointer' }}
+                <circle cx={p.x} cy={p.y} r={r} fill={imp === 1 ? 'var(--bg)' : p.c} stroke={p.c} strokeWidth={imp === 1 ? 3 : 1.1} pointerEvents="none" />
+                <circle cx={p.x} cy={p.y} r={Math.max(r + 7, 13)} fill="transparent" style={{ cursor: 'pointer' }}
                   onClick={() => toggleSel(p.o.id)}
                   onMouseEnter={(ev) => { if (drag.current.mode) return; const rr = stageRef.current!.getBoundingClientRect(); setHover({ id: p.o.id, mx: ev.clientX - rr.left, my: ev.clientY - rr.top }) }}
                   onMouseLeave={() => setHover(null)} />
