@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { HistEvent } from './types'
 import { THREADS, DOMAINS, THREAD_MAP, DOMAIN_MAP } from './data/threads'
+import MapMenu, { type Lens } from './MapMenu'
 
 type ColorMode = 'thread' | 'domain'
 
@@ -77,7 +78,7 @@ const LANE_H = 26
 
 type View = { k: number; tx: number; ty: number }
 
-export default function Timeline({ events }: { events: HistEvent[] }) {
+export default function Timeline({ events, lens, setLens }: { events: HistEvent[]; lens: Lens; setLens: (l: Lens) => void }) {
   const stageRef = useRef<HTMLDivElement>(null)
   const dimsRef = useRef({ w: 1200, h: 640 })
   const [dims, setDims] = useState({ w: 1200, h: 640 })
@@ -487,10 +488,7 @@ export default function Timeline({ events }: { events: HistEvent[] }) {
   return (
     <div className="app">
       <div className="topbar">
-        <div className="brand">
-          <b>Chronoline</b>
-          <span>a tube map of recorded history</span>
-        </div>
+        <MapMenu lens={lens} setLens={setLens} />
         <div className="seg" role="group" aria-label="Colour mode">
           <button className={colorMode === 'thread' ? 'on' : ''} onClick={() => setColorMode('thread')}>
             Region

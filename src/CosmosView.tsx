@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { COSMOS_ALL as COSMOS } from './data/cosmosAll'
 import type { CosmosObject, CosmosCategory } from './data/cosmos'
+import MapMenu, { type Lens } from './MapMenu'
 
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v))
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t
@@ -55,7 +56,7 @@ function reveals(a: CosmosObject, b: CosmosObject): string[] {
   return out.slice(0, 3)
 }
 
-export default function CosmosView() {
+export default function CosmosView({ lens, setLens }: { lens: Lens; setLens: (l: Lens) => void }) {
   const stageRef = useRef<HTMLDivElement>(null)
   const dimsRef = useRef({ w: 1200, h: 640 })
   const [dims, setDims] = useState({ w: 1200, h: 640 })
@@ -299,10 +300,7 @@ export default function CosmosView() {
   return (
     <div className="app">
       <div className="topbar">
-        <div className="brand">
-          <b>Chronoline · Cosmos</b>
-          <span>the scale of the universe</span>
-        </div>
+        <MapMenu lens={lens} setLens={setLens} />
         <div style={{ position: 'relative' }}>
           <button className="btn" aria-expanded={menuOpen} onClick={() => setMenuOpen((v) => !v)}>
             Options <span style={{ opacity: 0.55 }}>▾</span>
