@@ -73,6 +73,7 @@ export default function CosmosView() {
   const [allConst, setAllConst] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [hidden, setHidden] = useState<Set<string>>(() => new Set())
 
   const byId = useMemo(() => new Map(COSMOS.map((o) => [o.id, o])), [])
   const [loLy, hiLy] = useMemo(() => {
@@ -229,7 +230,7 @@ export default function CosmosView() {
   const showImp = (i: number) => (i <= 3 ? true : k >= 2.2)
   const showLbl = (i: number) => (i === 1 ? true : i === 2 ? k >= 1.1 : i === 3 ? k >= 1.9 : k >= 3.5)
 
-  const visible = COSMOS.filter((o) => showImp(o.importance))
+  const visible = COSMOS.filter((o) => showImp(o.importance) && !hidden.has(o.category))
     .map((o) => ({ o, x: sx(o.distanceLy), y: objY(o), c: CAT_MAP[o.category].color }))
     .filter((p) => p.x > -50 && p.x < w + 50)
     .sort((a, b) => b.o.importance - a.o.importance)
@@ -316,6 +317,21 @@ export default function CosmosView() {
                 <button className="menuitem" onClick={() => setAllConst((v) => !v)}>
                   <span>All constellations</span><span style={{ color: '#C56BD6' }}>{allConst ? '✓' : ''}</span>
                 </button>
+                <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
+                <div style={{ fontSize: 11, color: 'var(--muted)', padding: '3px 10px 2px' }}>Lines</div>
+                {CATEGORIES.map((c) => (
+                  <button
+                    key={c.id}
+                    className="menuitem"
+                    onClick={() => setHidden((h) => { const n = new Set(h); if (n.has(c.id)) n.delete(c.id); else n.add(c.id); return n })}
+                  >
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ width: 10, height: 10, borderRadius: 3, background: c.color, opacity: hidden.has(c.id) ? 0.3 : 1 }} />
+                      <span style={{ opacity: hidden.has(c.id) ? 0.5 : 1 }}>{c.name}</span>
+                    </span>
+                    <span style={{ color: c.color }}>{hidden.has(c.id) ? '' : '✓'}</span>
+                  </button>
+                ))}
               </div>
             </>
           )}
@@ -358,13 +374,15 @@ export default function CosmosView() {
           ))}
 
           {CATEGORIES.map((c, i) => {
+            if (hidden.has(c.id)) return null
             const y = catCenterY(i)
             const isZ = c.id === 'zodiac'
             return <line key={c.id} x1={clamp(sx(loLy), 0, w)} y1={y} x2={clamp(sx(hiLy), 0, w)} y2={y} stroke={c.color} strokeWidth={2.4} strokeLinecap="round" opacity={isZ ? 0.85 * (1 - sp) : 0.85} />
           })}
 
           {/* zodiac sign sub-lanes, revealed on zoom */}
-          {sp > 0.02 &&
+          {!hidden.has('zodiac') &&
+            sp > 0.02 &&
             (() => {
               const laneH = (bands[Z_IDX].h * 0.9) / mConst
               return constNames.map((sign, si) => {
